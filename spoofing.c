@@ -32,6 +32,31 @@ struct sniff_arp {
         u_int8_t arp_dmhost[6]; /*target mac address*/
         struct in_addr arp_target_ip; /*target ip address*/
 };
+
+struct sniff_ether {
+	u_int8_t ether_dhost[6];
+	u_int8_t ether_shost[6];
+	u_int16_t ether_type;
+};
+
+struct sniff_ip {
+        u_int8_t  ip_vhl;                 /* version << 4 | header length >> 2 */
+        u_int8_t  ip_tos;                 /* type of service */
+        u_int16_t ip_len;                 /* total length */
+        u_int16_t ip_id;                  /* identification */
+        u_int16_t ip_off;                 /* fragment offset field */
+        #define IP_RF 0x8000            /* reserved fragment flag */
+        #define IP_DF 0x4000            /* dont fragment flag */
+        #define IP_MF 0x2000            /* more fragments flag */
+        #define IP_OFFMASK 0x1fff       /* mask for fragmenting bits */
+        u_int8_t  ip_ttl;                 /* time to live */
+        u_int8_t  ip_p;                   /* protocol */
+        u_int16_t ip_sum;                 /* checksum */
+        struct  in_addr ip_src,ip_dst;  /* source and dest address */
+};
+#define IP_HL(ip)               (((ip)->ip_vhl) & 0x0f)
+#define IP_V(ip)                (((ip)->ip_vhl) >> 4)
+
 struct data {
 	u_char *dev;
 	u_char *sender_ip;
@@ -52,6 +77,7 @@ int check_reply (const u_char *packet, u_char *target_ip, u_char *target_mac);
 void show_data (const u_char * packet);
 
 void *arp_spoof(void *);
+void *arp_relay(void *);
 
 int main(int argc, char *argv[]) {
 	struct sniff_arp * arp_packet =  malloc(sizeof(struct sniff_arp));
@@ -104,7 +130,9 @@ int main(int argc, char *argv[]) {
 	}
 
 	pthread_create(&thread1, NULL, arp_spoof, (void *)&list);
+	pthread_create(&thread2, NULL, arp_relay, (void *)&list);
 	pthread_join(thread1, NULL);
+	pthread_join(thread2, NULL);
 
 }
 
@@ -126,6 +154,26 @@ void show_data (const u_char * packet) {
 
 }
 
+void *arp_relay(void *args) {
+	pcap_t *handle;
+	char errbuf[PCAP_ERRBUF_SIZE];
+        struct pcap_pkthdr *header;
+	const u_char *common_packet;
+
+	const struct sniff_ether * ethernet;
+	const struct sniff_ip * ip;
+
+	handle = pcap_open_live(list->dev, SNAP_LEN, 1, 1000, errbuf);
+
+	while (1) {
+	        if (pcap_next_ex(handle, &header, &common_packet) > 0) {
+			ethernet = (struct sniff_ether *)(common_packet);
+			ip = (struct sniff_ip *)(common_packet + 12);
+
+		}
+	}
+}
+
 void *arp_spoof(void *args) {
 	struct sniff_arp * sender_arp =  malloc(sizeof(struct sniff_arp));
 	struct sniff_arp * target_arp =  malloc(sizeof(struct sniff_arp));
@@ -134,7 +182,6 @@ void *arp_spoof(void *args) {
 	pcap_t *handle;
 	char errbuf[PCAP_ERRBUF_SIZE];
         struct pcap_pkthdr *header;
-	const u_char *common_packet;
 	int i;
 
 	u_char sender_packet[42];
